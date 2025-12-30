@@ -30,6 +30,7 @@ def lambda_handler(event, context):
             
             with Image.open(BytesIO(image_content)) as img:
                 metadata = {
+                    "source_bucket": bucket,  # <--- ¡AGREGA ESTA LÍNEA!
                     "original_key": key,
                     "format": img.format,
                     "width": img.width,
