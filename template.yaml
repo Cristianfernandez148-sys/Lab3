@@ -1,0 +1,62 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Lab 3 - Pipeline 
+
+Resources:
+  ImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "lab3-images-${AWS::AccountId}-${AWS::Region}"
+
+  ImagesQueue:
+    Type: AWS::SQS::Queue
+
+  IngestFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ingest/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          QUEUE_URL: !Ref ImagesQueue
+      Policies:
+        - SQSSendMessagePolicy: 
+            QueueName: !GetAtt ImagesQueue.QueueName
+      Events:
+        S3NewObject:
+          Type: S3
+          Properties:
+            Bucket: !Ref ImagesBucket
+            Events: s3:ObjectCreated:*
+            Filter: 
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: incoming/
+  ProcessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: process/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Timeout: 10
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref ImagesBucket
+        - S3WritePolicy:
+            BucketName: !Ref ImagesBucket
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt ImagesQueue.Arn
+            BatchSize: 1 
+
+Outputs:
+  BucketName: 
+    Value: !Ref ImagesBucket
+    Description: Bucket for automate testing
+  QueueUrl:
+    Value: !Ref ImagesQueue
+    Description: SQS URL
