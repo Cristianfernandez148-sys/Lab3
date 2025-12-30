@@ -1,62 +1,79 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Lab 3 - Pipeline 
+Description: "Lab 3 - Asynchronous Serverless Image Metadata Pipeline (S3->Lambda->SQS->Lambda->S3)"
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 256
+    Tracing: Active
 
 Resources:
-  ImagesBucket:
+  # S3 bucket (unique name using AccountId + Region)  [oai_citation:8‡Lab_3.pdf](sediment://file_0000000082a471f584a6051fe1c4bbdf)
+  DataBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "lab3-images-${AWS::AccountId}-${AWS::Region}"
+      BucketName: !Sub "coderoad-lab3-${AWS::AccountId}-${AWS::Region}"
 
-  ImagesQueue:
+  # SQS queue as the sole decoupling mechanism  [oai_citation:9‡Lab_3.pdf](sediment://file_0000000082a471f584a6051fe1c4bbdf)
+  ImageQueue:
     Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 60
 
+  # Ingest Lambda: triggered ONLY by incoming/ and sends bucket/key/etag to SQS  [oai_citation:10‡Lab_3.pdf](sediment://file_0000000082a471f584a6051fe1c4bbdf)
   IngestFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: ingest/
       Handler: app.lambda_handler
-      Runtime: python3.9
       Environment:
         Variables:
-          QUEUE_URL: !Ref ImagesQueue
+          QUEUE_URL: !Ref ImageQueue
       Policies:
-        - SQSSendMessagePolicy: 
-            QueueName: !GetAtt ImagesQueue.QueueName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt ImageQueue.QueueName
       Events:
-        S3NewObject:
+        S3IncomingEvent:
           Type: S3
           Properties:
-            Bucket: !Ref ImagesBucket
+            Bucket: !Ref DataBucket
             Events: s3:ObjectCreated:*
-            Filter: 
+            Filter:
               S3Key:
                 Rules:
                   - Name: prefix
                     Value: incoming/
-  ProcessFunction:
+
+  # Processor Lambda: consumes SQS, reads image from S3, writes metadata JSON to metadata/  [oai_citation:11‡Lab_3.pdf](sediment://file_0000000082a471f584a6051fe1c4bbdf)
+  ProcessorFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: process/
+      CodeUri: processor/
       Handler: app.lambda_handler
-      Runtime: python3.9
-      Timeout: 10
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref DataBucket
+          METADATA_PREFIX: metadata/
       Policies:
         - S3ReadPolicy:
-            BucketName: !Ref ImagesBucket
+            BucketName: !Ref DataBucket
         - S3WritePolicy:
-            BucketName: !Ref ImagesBucket
+            BucketName: !Ref DataBucket
+        - SQSPollerPolicy:
+            QueueName: !GetAtt ImageQueue.QueueName
       Events:
-        SQSEvent:
+        QueueEvent:
           Type: SQS
           Properties:
-            Queue: !GetAtt ImagesQueue.Arn
-            BatchSize: 1 
+            Queue: !GetAtt ImageQueue.Arn
+            BatchSize: 5
 
 Outputs:
-  BucketName: 
-    Value: !Ref ImagesBucket
-    Description: Bucket for automate testing
+  BucketName:
+    Value: !Ref DataBucket
   QueueUrl:
-    Value: !Ref ImagesQueue
-    Description: SQS URL
+    Value: !Ref ImageQueue

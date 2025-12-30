@@ -1,31 +1,41 @@
 import json
 import os
+import urllib.parse
+
 import boto3
 
-sqs = boto3.client('sqs')
-QUEUE_URL = os.environ['QUEUE_URL']
+sqs = boto3.client("sqs")
+
+ALLOWED_EXTS = (".jpg", ".jpeg", ".png")
 
 def lambda_handler(event, context):
-    for record in event['Records']:
-        bucket = record['s3']['bucket']['name']
-        key = record['s3']['object']['key']
-        etag = record['s3']['object']['eTag']
+    queue_url = os.environ["QUEUE_URL"]
 
-        file_extension = os.path.splitext(key)[1].lower()
-        if file_extension not in ['.jpg', '.jpeg', '.png']:
-            print(f"Archivo ignorado (no es imagen): {key}")
+    # S3 event can have multiple records
+    for record in event.get("Records", []):
+        s3_info = record.get("s3", {})
+        bucket = s3_info.get("bucket", {}).get("name")
+        key = s3_info.get("object", {}).get("key")
+        etag = s3_info.get("object", {}).get("eTag") or s3_info.get("object", {}).get("etag")
+
+        if not bucket or not key:
             continue
 
-        message_body = {
-            'bucket': bucket,
-            'key': key,
-            'etag': etag
-        }
+        key = urllib.parse.unquote_plus(key)
 
-        response = sqs.send_message(
-            QueueUrl=QUEUE_URL,
-            MessageBody=json.dumps(message_body)
+        # Loop prevention: only incoming/ triggers processing  [oai_citation:13‡Lab_3.pdf](sediment://file_0000000082a471f584a6051fe1c4bbdf)
+        if not key.startswith("incoming/"):
+            continue
+
+        # Validate file type  [oai_citation:14‡Lab_3.pdf](sediment://file_0000000082a471f584a6051fe1c4bbdf)
+        lower = key.lower()
+        if not lower.endswith(ALLOWED_EXTS):
+            continue
+
+        msg = {"bucket": bucket, "key": key, "etag": etag}
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=json.dumps(msg),
         )
-        print(f"Enviado a SQS: {key} - MessageId: {response['MessageId']}")
-    
-    return {"statusCode": 200}
+
+    return {"ok": True}
