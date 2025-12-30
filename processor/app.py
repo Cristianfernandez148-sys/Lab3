@@ -70,8 +70,8 @@ def lambda_handler(event, context):
         fmt = (img.format or "").lower()
 
         meta = {
-            "bucket": bucket,
-            "key": key,
+            "source_bucket": bucket,
+            "source_key": key,
             "etag": etag,
             "format": fmt,
             "width": width,
